@@ -1,6 +1,7 @@
 # Blink pong
 
-Making two esp32 boards play blinking LED pong.
+Making two esp32 boards play blinking LED pong. This is basically
+a combo of the ESP-IDF examples "espnow" and "blink".
 
 ## Instructions
 

@@ -1,4 +1,4 @@
-/* ESPNOW Example
+/* ESPNOW LED Pong Example
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -7,11 +7,6 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 
-/*
-   This example shows how to use ESPNOW.
-   Prepare two device, one for sending ESPNOW data and another for receiving
-   ESPNOW data.
-*/
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
@@ -31,14 +26,15 @@
 #include "esp32/rom/crc.h"
 #include "pong.h"
 
-static const char *TAG = "espnow_example";
+static const char *TAG = "espnow_pong";
 
-static xQueueHandle s_example_espnow_queue;
+static xQueueHandle s_message_queue;
+static xQueueHandle s_led_queue;
 
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-static uint16_t s_example_espnow_seq[EXAMPLE_ESPNOW_DATA_MAX] = {0, 0};
+static uint16_t s_pong_seq[pong_DATA_MAX] = {0, 0};
 
-static void example_espnow_deinit(example_espnow_send_param_t *send_param);
+static void pong_deinit(pong_send_param_t *send_param);
 
 /* WiFi should start before using ESPNOW */
 static void example_wifi_init(void)
@@ -59,10 +55,10 @@ static void example_wifi_init(void)
 /* ESPNOW sending or receiving callback function is called in WiFi task.
  * Users should not do lengthy operations from this task. Instead, post
  * necessary data to a queue and handle it from a lower priority task. */
-static void example_espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+static void pong_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-    example_espnow_event_t evt;
-    example_espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
+    pong_event_t evt;
+    pong_event_send_cb_t *send_cb = &evt.info.send_cb;
 
     if (mac_addr == NULL)
     {
@@ -70,19 +66,19 @@ static void example_espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_
         return;
     }
 
-    evt.id = EXAMPLE_ESPNOW_SEND_CB;
+    evt.id = pong_SEND_CB;
     memcpy(send_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
     send_cb->status = status;
-    if (xQueueSend(s_example_espnow_queue, &evt, portMAX_DELAY) != pdTRUE)
+    if (xQueueSend(s_message_queue, &evt, portMAX_DELAY) != pdTRUE)
     {
         ESP_LOGW(TAG, "Send send queue fail");
     }
 }
 
-static void example_espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len)
+static void pong_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len)
 {
-    example_espnow_event_t evt;
-    example_espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
+    pong_event_t evt;
+    pong_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
 
     if (mac_addr == NULL || data == NULL || len <= 0)
     {
@@ -90,7 +86,7 @@ static void example_espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data,
         return;
     }
 
-    evt.id = EXAMPLE_ESPNOW_RECV_CB;
+    evt.id = pong_RECV_CB;
     memcpy(recv_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
     recv_cb->data = malloc(len);
     if (recv_cb->data == NULL)
@@ -100,7 +96,7 @@ static void example_espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data,
     }
     memcpy(recv_cb->data, data, len);
     recv_cb->data_len = len;
-    if (xQueueSend(s_example_espnow_queue, &evt, portMAX_DELAY) != pdTRUE)
+    if (xQueueSend(s_message_queue, &evt, portMAX_DELAY) != pdTRUE)
     {
         ESP_LOGW(TAG, "Send receive queue fail");
         free(recv_cb->data);
@@ -108,12 +104,12 @@ static void example_espnow_recv_cb(const uint8_t *mac_addr, const uint8_t *data,
 }
 
 /* Parse received ESPNOW data. */
-int example_espnow_data_parse(uint8_t *data, uint16_t data_len, uint8_t *state, uint16_t *seq, int *magic)
+int pong_data_parse(uint8_t *data, uint16_t data_len, uint8_t *state, uint16_t *seq, int *magic)
 {
-    example_espnow_data_t *buf = (example_espnow_data_t *)data;
+    pong_data_t *buf = (pong_data_t *)data;
     uint16_t crc, crc_cal = 0;
 
-    if (data_len < sizeof(example_espnow_data_t))
+    if (data_len < sizeof(pong_data_t))
     {
         ESP_LOGE(TAG, "Receive ESPNOW data too short, len:%d", data_len);
         return -1;
@@ -135,25 +131,25 @@ int example_espnow_data_parse(uint8_t *data, uint16_t data_len, uint8_t *state, 
 }
 
 /* Prepare ESPNOW data to be sent. */
-void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
+void pong_data_prepare(pong_send_param_t *send_param)
 {
-    example_espnow_data_t *buf = (example_espnow_data_t *)send_param->buffer;
+    pong_data_t *buf = (pong_data_t *)send_param->buffer;
 
-    assert(send_param->len >= sizeof(example_espnow_data_t));
+    assert(send_param->len >= sizeof(pong_data_t));
 
-    buf->type = IS_BROADCAST_ADDR(send_param->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
+    buf->type = IS_BROADCAST_ADDR(send_param->dest_mac) ? pong_DATA_BROADCAST : pong_DATA_UNICAST;
     buf->state = send_param->state;
-    buf->seq_num = s_example_espnow_seq[buf->type]++;
+    buf->seq_num = s_pong_seq[buf->type]++;
     buf->crc = 0;
     buf->magic = send_param->magic;
     /* Fill all remaining bytes after the data with random values */
-    esp_fill_random(buf->payload, send_param->len - sizeof(example_espnow_data_t));
+    esp_fill_random(buf->payload, send_param->len - sizeof(pong_data_t));
     buf->crc = crc16_le(UINT16_MAX, (uint8_t const *)buf, send_param->len);
 }
 
-static void example_espnow_task(void *pvParameter)
+static void pong_task(void *pvParameter)
 {
-    example_espnow_event_t evt;
+    pong_event_t evt;
     uint8_t recv_state = 0;
     uint16_t recv_seq = 0;
     int recv_magic = 0;
@@ -164,21 +160,21 @@ static void example_espnow_task(void *pvParameter)
     ESP_LOGI(TAG, "Start sending broadcast data");
 
     /* Start sending broadcast ESPNOW data. */
-    example_espnow_send_param_t *send_param = (example_espnow_send_param_t *)pvParameter;
+    pong_send_param_t *send_param = (pong_send_param_t *)pvParameter;
     if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK)
     {
         ESP_LOGE(TAG, "Send error");
-        example_espnow_deinit(send_param);
+        pong_deinit(send_param);
         vTaskDelete(NULL);
     }
 
-    while (xQueueReceive(s_example_espnow_queue, &evt, portMAX_DELAY) == pdTRUE)
+    while (xQueueReceive(s_message_queue, &evt, portMAX_DELAY) == pdTRUE)
     {
         switch (evt.id)
         {
-        case EXAMPLE_ESPNOW_SEND_CB:
+        case pong_SEND_CB:
         {
-            example_espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
+            pong_event_send_cb_t *send_cb = &evt.info.send_cb;
             is_broadcast = IS_BROADCAST_ADDR(send_cb->mac_addr);
 
             ESP_LOGD(TAG, "Send data to " MACSTR ", status1: %d", MAC2STR(send_cb->mac_addr), send_cb->status);
@@ -194,7 +190,7 @@ static void example_espnow_task(void *pvParameter)
                 if (send_param->count == 0)
                 {
                     ESP_LOGI(TAG, "Send done");
-                    example_espnow_deinit(send_param);
+                    pong_deinit(send_param);
                     vTaskDelete(NULL);
                 }
             }
@@ -208,24 +204,24 @@ static void example_espnow_task(void *pvParameter)
             ESP_LOGI(TAG, "send data to " MACSTR "", MAC2STR(send_cb->mac_addr));
 
             memcpy(send_param->dest_mac, send_cb->mac_addr, ESP_NOW_ETH_ALEN);
-            example_espnow_data_prepare(send_param);
+            pong_data_prepare(send_param);
 
             /* Send the next data after the previous data is sent. */
             if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK)
             {
                 ESP_LOGE(TAG, "Send error");
-                example_espnow_deinit(send_param);
+                pong_deinit(send_param);
                 vTaskDelete(NULL);
             }
             break;
         }
-        case EXAMPLE_ESPNOW_RECV_CB:
+        case pong_RECV_CB:
         {
-            example_espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
+            pong_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
 
-            ret = example_espnow_data_parse(recv_cb->data, recv_cb->data_len, &recv_state, &recv_seq, &recv_magic);
+            ret = pong_data_parse(recv_cb->data, recv_cb->data_len, &recv_state, &recv_seq, &recv_magic);
             free(recv_cb->data);
-            if (ret == EXAMPLE_ESPNOW_DATA_BROADCAST)
+            if (ret == pong_DATA_BROADCAST)
             {
                 ESP_LOGI(TAG, "Receive %dth broadcast data from: " MACSTR ", len: %d", recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
 
@@ -236,7 +232,7 @@ static void example_espnow_task(void *pvParameter)
                     if (peer == NULL)
                     {
                         ESP_LOGE(TAG, "Malloc peer information fail");
-                        example_espnow_deinit(send_param);
+                        pong_deinit(send_param);
                         vTaskDelete(NULL);
                     }
                     memset(peer, 0, sizeof(esp_now_peer_info_t));
@@ -272,11 +268,11 @@ static void example_espnow_task(void *pvParameter)
 
                         /* Start sending unicast ESPNOW data. */
                         memcpy(send_param->dest_mac, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
-                        example_espnow_data_prepare(send_param);
+                        pong_data_prepare(send_param);
                         if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK)
                         {
                             ESP_LOGE(TAG, "Send error");
-                            example_espnow_deinit(send_param);
+                            pong_deinit(send_param);
                             vTaskDelete(NULL);
                         }
                         else
@@ -287,7 +283,7 @@ static void example_espnow_task(void *pvParameter)
                     }
                 }
             }
-            else if (ret == EXAMPLE_ESPNOW_DATA_UNICAST)
+            else if (ret == pong_DATA_UNICAST)
             {
                 ESP_LOGI(TAG, "Receive %dth unicast data from: " MACSTR ", len: %d", recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
 
@@ -307,21 +303,28 @@ static void example_espnow_task(void *pvParameter)
     }
 }
 
-static esp_err_t example_espnow_init(void)
+static esp_err_t pong_init(void)
 {
-    example_espnow_send_param_t *send_param;
+    pong_send_param_t *send_param;
 
-    s_example_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(example_espnow_event_t));
-    if (s_example_espnow_queue == NULL)
+    s_message_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(pong_event_t));
+    if (s_message_queue == NULL)
     {
-        ESP_LOGE(TAG, "Create mutex fail");
+        ESP_LOGE(TAG, "Create message queue mutex fail");
+        return ESP_FAIL;
+    }
+
+    s_led_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(int));
+    if (s_led_queue == NULL)
+    {
+        ESP_LOGE(TAG, "Create led queue mutex fail");
         return ESP_FAIL;
     }
 
     /* Initialize ESPNOW and register sending and receiving callback function. */
     ESP_ERROR_CHECK(esp_now_init());
-    ESP_ERROR_CHECK(esp_now_register_send_cb(example_espnow_send_cb));
-    ESP_ERROR_CHECK(esp_now_register_recv_cb(example_espnow_recv_cb));
+    ESP_ERROR_CHECK(esp_now_register_send_cb(pong_send_cb));
+    ESP_ERROR_CHECK(esp_now_register_recv_cb(pong_recv_cb));
 
     /* Set primary master key. */
     ESP_ERROR_CHECK(esp_now_set_pmk((uint8_t *)CONFIG_ESPNOW_PMK));
@@ -331,7 +334,8 @@ static esp_err_t example_espnow_init(void)
     if (peer == NULL)
     {
         ESP_LOGE(TAG, "Malloc peer information fail");
-        vSemaphoreDelete(s_example_espnow_queue);
+        vSemaphoreDelete(s_message_queue);
+        vSemaphoreDelete(s_led_queue);
         esp_now_deinit();
         return ESP_FAIL;
     }
@@ -344,12 +348,13 @@ static esp_err_t example_espnow_init(void)
     free(peer);
 
     /* Initialize sending parameters. */
-    send_param = malloc(sizeof(example_espnow_send_param_t));
-    memset(send_param, 0, sizeof(example_espnow_send_param_t));
+    send_param = malloc(sizeof(pong_send_param_t));
+    memset(send_param, 0, sizeof(pong_send_param_t));
     if (send_param == NULL)
     {
         ESP_LOGE(TAG, "Malloc send parameter fail");
-        vSemaphoreDelete(s_example_espnow_queue);
+        vSemaphoreDelete(s_message_queue);
+        vSemaphoreDelete(s_led_queue);
         esp_now_deinit();
         return ESP_FAIL;
     }
@@ -365,27 +370,29 @@ static esp_err_t example_espnow_init(void)
     {
         ESP_LOGE(TAG, "Malloc send buffer fail");
         free(send_param);
-        vSemaphoreDelete(s_example_espnow_queue);
+        vSemaphoreDelete(s_message_queue);
+        vSemaphoreDelete(s_led_queue);
         esp_now_deinit();
         return ESP_FAIL;
     }
     memcpy(send_param->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-    example_espnow_data_prepare(send_param);
+    pong_data_prepare(send_param);
 
-    xTaskCreate(example_espnow_task, "example_espnow_task", 2048, send_param, 4, NULL);
+    xTaskCreate(pong_task, "pong_task", 2048, send_param, 4, NULL);
 
     return ESP_OK;
 }
 
-static void example_espnow_deinit(example_espnow_send_param_t *send_param)
+static void pong_deinit(pong_send_param_t *send_param)
 {
     free(send_param->buffer);
     free(send_param);
-    vSemaphoreDelete(s_example_espnow_queue);
+    vSemaphoreDelete(s_message_queue);
+    vSemaphoreDelete(s_led_queue);
     esp_now_deinit();
 }
 
-static void vinit_gpio()
+static void v_init_gpio()
 {
     /* Configure the IOMUX register for pad BLINK_GPIO (some pads are
        muxed to GPIO on reset already, but some default to other
@@ -410,9 +417,9 @@ void app_main()
     ESP_ERROR_CHECK(ret);
 
     example_wifi_init();
-    example_espnow_init();
+    pong_init();
 
-    vinit_gpio();
+    v_init_gpio();
     while (1)
     {
         /* Blink off (output low) */
