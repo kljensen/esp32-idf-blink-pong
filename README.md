@@ -13,7 +13,42 @@ The built-in LED to GPIO2.
 
 On my mac, the devices show up as `/dev/cu.SLAB_USBtoUART`. Yours may show up as something different.
 
-Flash
+### Build
+
+Choose a path for your esp-idf. Mine is
+`/Users/kljensen/src/github.com/espressif/esp-idf`.
+Then,
+
+```
+export IDF_PATH=$HOME/src/github.com/espressif/esp-idf
+git clone -b v4.0 --recursive https://github.com/espressif/esp-idf.git $IDF_PATH
+. $IDF_PATH/export.sh
+```
+
+Notice this will do fancy stuff like create a python
+environment for your development. See
+[the guide](https://docs.espressif.com/projects/esp-idf/en/stable/get-started/)
+for customizing or avoiding this behavior.
+
+### Flash
+
+Assuming you have done
+
+```
+export IDF_PATH=$HOME/src/github.com/espressif/esp-idf
+. $IDF_PATH/export.sh
+```
+
+Then you'd do
+
 ```
 idf.py -p /dev/cu.SLAB_USBtoUART flash
 ```
+
+You can monitor the serial output with
+
+```
+idf.py -p /dev/cu.SLAB_USBtoUART monitor
+```
+
+Quit this program with `^[`: that is, `control` and `[`).
