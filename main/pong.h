@@ -9,6 +9,7 @@
 
 #ifndef PONG_H
 #define PONG_H
+#define BLINK_GPIO 2
 
 /* ESPNOW can work in both station and softap mode. It is configured in menuconfig. */
 #if CONFIG_ESPNOW_WIFI_MODE_STATION
