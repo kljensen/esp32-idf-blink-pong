@@ -27,8 +27,8 @@
 
 typedef enum
 {
-    pong_SEND_CB,
-    pong_RECV_CB,
+    PONG_SEND_CB,
+    PONG_RECV_CB,
 } pong_event_id_t;
 
 typedef struct

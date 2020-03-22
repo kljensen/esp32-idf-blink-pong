@@ -66,7 +66,7 @@ static void pong_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
         return;
     }
 
-    evt.id = pong_SEND_CB;
+    evt.id = PONG_SEND_CB;
     memcpy(send_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
     send_cb->status = status;
     if (xQueueSend(s_message_queue, &evt, portMAX_DELAY) != pdTRUE)
@@ -86,7 +86,7 @@ static void pong_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len)
         return;
     }
 
-    evt.id = pong_RECV_CB;
+    evt.id = PONG_RECV_CB;
     memcpy(recv_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
     recv_cb->data = malloc(len);
     if (recv_cb->data == NULL)
@@ -172,7 +172,7 @@ static void pong_task(void *pvParameter)
     {
         switch (evt.id)
         {
-        case pong_SEND_CB:
+        case PONG_SEND_CB:
         {
             pong_event_send_cb_t *send_cb = &evt.info.send_cb;
             is_broadcast = IS_BROADCAST_ADDR(send_cb->mac_addr);
@@ -215,7 +215,7 @@ static void pong_task(void *pvParameter)
             }
             break;
         }
-        case pong_RECV_CB:
+        case PONG_RECV_CB:
         {
             pong_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
 
